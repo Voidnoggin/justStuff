@@ -1,0 +1,27 @@
+.{
+    .name = "JustStuff",
+    .version = "0.1.0",
+    .dependencies = .{
+        .zglfw = .{ .path = "lib/zig-gamedev/libs/zglfw" },
+        .zgpu = .{ .path = "lib/zig-gamedev/libs/zgpu" },
+        .zmath = .{ .path = "lib/zig-gamedev/libs/zmath" },
+        .zmesh = .{ .path = "lib/zig-gamedev/libs/zmesh" },
+        .zgui = .{ .path = "lib/zig-gamedev/libs/zgui" },
+
+        .dawn_x86_64_windows_gnu = .{
+            .url = "https://github.com/michal-z/webgpu_dawn-x86_64-windows-gnu/archive/d3a68014e6b6b53fd330a0ccba99e4dcfffddae5.tar.gz",
+            .hash = "1220f9448cde02ef3cd51bde2e0850d4489daa0541571d748154e89c6eb46c76a267",
+        },
+        .dawn_x86_64_linux_gnu = .{
+            .url = "https://github.com/michal-z/webgpu_dawn-x86_64-linux-gnu/archive/7d70db023bf254546024629cbec5ee6113e12a42.tar.gz",
+            .hash = "12204a3519efd49ea2d7cf63b544492a3a771d37eda320f86380813376801e4cfa73",
+        },
+    },
+    .paths = .{
+        "src",
+        "libs",
+        "build.zig",
+        "build.zig.zon",
+        "README.md",
+    },
+}

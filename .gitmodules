@@ -1,0 +1,3 @@
+[submodule "libs/zig-gamedev"]
+	path = libs/zig-gamedev
+	url = ../../zig-gamedev/zig-gamedev
