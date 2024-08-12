@@ -7,4 +7,9 @@ pub fn main() !void {
     const alloc = heap.allocator();
 
     try graphics.init(alloc);
+    defer graphics.deinit(alloc);
+
+    while (graphics.shouldContinue()) {
+        graphics.drawFrame();
+    }
 }
