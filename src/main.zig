@@ -10,6 +10,9 @@ pub fn main() !void {
     defer graphics.deinit(alloc);
 
     while (graphics.shouldContinue()) {
-        graphics.drawFrame();
+        graphics.drawFrame() catch |err| {
+            std.debug.print("\n\nERROR: {}\n\n", .{err});
+            break;
+        };
     }
 }

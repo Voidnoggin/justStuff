@@ -3,6 +3,7 @@ const zg = @import("zig_gamedev");
 const glfw = zg.zglfw;
 const gpu = zg.zgpu;
 const zm = zg.zmath;
+const zmesh = zg.zmesh;
 const wgsl = @import("shader_wgsl.zig");
 
 var ctx = Context{};
@@ -13,7 +14,7 @@ pub fn shouldContinue() bool {
     return no_exit_requested;
 }
 
-pub fn drawFrame() void {
+pub fn drawFrame() !void {
     const gctx = ctx.gctx;
     const fb_width = gctx.swapchain_descriptor.width;
     const fb_height = gctx.swapchain_descriptor.height;
@@ -43,8 +44,10 @@ pub fn drawFrame() void {
     };
 
     // Lookup common resources which may be needed for all the passes.
-    const depth_texv = gctx.lookupResource(ctx.depth.texv) orelse return;
-    const uniform_bg = gctx.lookupResource(ctx.uniform_bg) orelse return;
+    const depth_texv = gctx.lookupResource(ctx.depth.texv) orelse return error.a;
+    const uniform_bg = gctx.lookupResource(ctx.uniform_bg) orelse return error.b;
+    const vertex_buf_info = gctx.lookupResourceInfo(ctx.vertex_buf) orelse return error.c;
+    const index_buf_info = gctx.lookupResourceInfo(ctx.index_buf) orelse return error.d;
 
     const swapchain_texv = gctx.swapchain.getCurrentTextureView();
     defer swapchain_texv.release();
@@ -74,14 +77,56 @@ pub fn drawFrame() void {
             );
             defer gpu.endReleasePass(pass);
 
+            pass.setVertexBuffer(0, vertex_buf_info.gpuobj.?, 0, vertex_buf_info.size);
+            pass.setIndexBuffer(
+                index_buf_info.gpuobj.?,
+                if (Context.Mesh.IndexType == u16) .uint16 else .uint32,
+                0,
+                index_buf_info.size,
+            );
+
             pass.setPipeline(render_pipe);
             pass.setBindGroup(0, uniform_bg, &.{frame_unif_mem.offset});
+
+            const mem = gctx.uniformsAllocate(Context.DrawUniforms, 1);
+            mem.slice[0] = .{
+                .object_to_world = zm.identity(),
+            };
+            pass.setBindGroup(1, uniform_bg, &.{mem.offset});
+            pass.drawIndexed(
+                6, // num indices
+                1,
+                0, // index offset
+                0, // vertex offset
+                0,
+            );
         }
         break :commands encoder.finish(null);
     };
     defer commands.release();
 
     gctx.submit(&.{commands});
+
+    if (ctx.gctx.present() == .swap_chain_resized) {
+        // Release old depth texture.
+        ctx.gctx.releaseResource(ctx.depth.texv);
+        ctx.gctx.destroyResource(ctx.depth.tex);
+
+        // Create a new depth texture to match the new window size.
+        ctx.depth.tex = ctx.gctx.createTexture(.{
+            .usage = .{ .render_attachment = true },
+            .dimension = .tdim_2d,
+            .size = .{
+                .width = ctx.gctx.swapchain_descriptor.width,
+                .height = ctx.gctx.swapchain_descriptor.height,
+                .depth_or_array_layers = 1,
+            },
+            .format = .depth32_float,
+            .mip_level_count = 1,
+            .sample_count = 1,
+        });
+        ctx.depth.texv = ctx.gctx.createTextureView(ctx.depth.tex, .{});
+    }
 }
 
 pub fn init(alloc: std.mem.Allocator) !void {
@@ -135,6 +180,7 @@ pub fn init(alloc: std.mem.Allocator) !void {
     ctx.depth = .{ .tex = depth_tex, .texv = depth_texv };
 
     try createPipeline(alloc);
+    try createSquare();
 }
 
 pub fn deinit(alloc: std.mem.Allocator) void {
@@ -142,7 +188,7 @@ pub fn deinit(alloc: std.mem.Allocator) void {
     glfw.terminate();
 }
 
-pub fn createPipeline(alloc: std.mem.Allocator) !void {
+fn createPipeline(alloc: std.mem.Allocator) !void {
     const pl = ctx.gctx.createPipelineLayout(&.{ ctx.uniform_bgl, ctx.uniform_bgl });
     defer ctx.gctx.releaseResource(pl);
 
@@ -202,6 +248,32 @@ pub fn createPipeline(alloc: std.mem.Allocator) !void {
     ctx.gctx.createRenderPipelineAsync(alloc, pl, pipe_desc, &ctx.render_pipe);
 }
 
+fn createSquare() !void {
+    const vertices: []const f32 = &.{
+        1,  1,  10,
+        1,  -1, 10,
+        -1, -1, 10,
+        -1, 1,  10,
+    };
+    const indices: []const Context.Mesh.IndexType = &.{
+        0, 1, 2,
+        2, 3, 0,
+    };
+
+    ctx.vertex_buf = ctx.gctx.createBuffer(.{
+        .usage = .{ .copy_dst = true, .vertex = true },
+        .size = vertices.len * @sizeOf(f32),
+    });
+    ctx.gctx.queue.writeBuffer(ctx.gctx.lookupResource(ctx.vertex_buf).?, 0, f32, vertices);
+
+    // Index buffer
+    ctx.index_buf = ctx.gctx.createBuffer(.{
+        .usage = .{ .copy_dst = true, .index = true },
+        .size = indices.len * @sizeOf(Context.Mesh.IndexType),
+    });
+    ctx.gctx.queue.writeBuffer(ctx.gctx.lookupResource(ctx.index_buf).?, 0, Context.Mesh.IndexType, indices);
+}
+
 pub const Context = struct {
     window: *glfw.Window = undefined,
     gctx: *gpu.GraphicsContext = undefined,
@@ -214,10 +286,8 @@ pub const Context = struct {
     depth: Depth = undefined,
     draw_commands: ?gpu.wgpu.CommandBuffer = null,
 
-    // Mesh Buffers
     vertex_buf: gpu.BufferHandle = undefined,
     index_buf: gpu.BufferHandle = undefined,
-    meshes: std.ArrayList(Mesh) = undefined,
 
     // Anything that needs to be uploaded to GPU as a block (like this struct) needs extern to be safe.
     pub const FrameUniforms = extern struct {

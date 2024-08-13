@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) !void {
 
     // The executable
     const exe = b.addExecutable(.{
-        .name = "HeavenBellows",
+        .name = "justStuff",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
