@@ -23,19 +23,6 @@ pub fn build(b: *std.Build) !void {
         .target = target,
     });
 
-    // Dependencies Module
-    _ = b.addModule("zig_gamedev", .{
-        .root_source_file = b.path("src/dependencies.zig"),
-        .imports = &.{
-            .{ .name = "zmesh", .module = zmesh.module("root") },
-            .{ .name = "zgui", .module = zgui.module("root") },
-            .{ .name = "zglfw", .module = zglfw.module("root") },
-            .{ .name = "zgpu", .module = zgpu.module("root") },
-            .{ .name = "zmath", .module = zmath.module("root") },
-        },
-    });
-    const zig_gamedev = b.modules.get("zig_gamedev").?;
-
     // The executable
     const exe = b.addExecutable(.{
         .name = "justStuff",
@@ -43,8 +30,12 @@ pub fn build(b: *std.Build) !void {
         .target = target,
         .optimize = optimize,
     });
-    if (exe.root_module.optimize != .Debug) exe.want_lto = false; // Problems with LTO in Release modes on Windows.
-    exe.root_module.addImport("zig_gamedev", zig_gamedev);
+    exe.root_module.addImport("zglfw", zglfw.module("root"));
+    exe.root_module.addImport("zgpu", zgpu.module("root"));
+    exe.root_module.addImport("zgui", zgui.module("root"));
+    exe.root_module.addImport("zmath", zmath.module("root"));
+    exe.root_module.addImport("zmesh", zmesh.module("root"));
+
     b.installArtifact(exe);
     exe.linkLibrary(zglfw.artifact("glfw"));
     exe.linkLibrary(zgpu.artifact("zdawn"));

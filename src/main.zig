@@ -9,10 +9,13 @@ pub fn main() !void {
     try graphics.init(alloc);
     defer graphics.deinit(alloc);
 
+    var was_error: ?anyerror = null;
     while (graphics.shouldContinue()) {
         graphics.drawFrame() catch |err| {
             std.debug.print("\n\nERROR: {}\n\n", .{err});
+            was_error = err;
             break;
         };
     }
+    if (was_error) |err| return err;
 }
