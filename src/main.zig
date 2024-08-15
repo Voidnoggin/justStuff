@@ -9,7 +9,7 @@ pub fn main() !void {
     try graphics.init(alloc);
     defer graphics.deinit(alloc);
 
-    try graphics.loadGltfMesh(alloc, "assets/cube.gltf");
+    try graphics.loadGltfMesh(alloc, "assets/horizon.gltf");
 
     var was_error: ?anyerror = null;
     while (graphics.shouldContinue()) {
