@@ -1,126 +1,11 @@
 const std = @import("std");
-
 const zglfw = @import("zglfw");
 const zgpu = @import("zgpu");
 const zmath = @import("zmath");
 const zmesh = @import("zmesh");
-
 const wgsl = @import("shader_wgsl.zig");
 
-var ctx = Context{};
-
-pub fn shouldContinue() bool {
-    const no_exit_requested = !ctx.window.shouldClose() and ctx.window.getKey(.escape) != .press;
-    zglfw.pollEvents();
-    return no_exit_requested;
-}
-
-pub fn drawFrame() !void {
-    const gctx = ctx.gctx;
-    const fb_width = gctx.swapchain_descriptor.width;
-    const fb_height = gctx.swapchain_descriptor.height;
-
-    const eye = zmath.f32x4(0, -10, 0, 0);
-    const up = zmath.f32x4(0, 0, 1, 0);
-    const forward = zmath.f32x4(0, 1, 0, 0);
-    const view = zmath.lookToRh(eye, forward, up);
-
-    const near = 0.1;
-    const fov_y = 0.33 * std.math.pi;
-    const f = 1.0 / std.math.tan(fov_y / 2.0);
-    const a: f32 = @as(f32, @floatFromInt(fb_width)) / @as(f32, @floatFromInt(fb_height));
-    const projection = zmath.Mat{ // infinite far plane, reversed z
-        zmath.f32x4(f / a, 0.0, 0.0, 0.0),
-        zmath.f32x4(0.0, f, 0.0, 0.0),
-        zmath.f32x4(0.0, 0.0, 0.0, -1.0),
-        zmath.f32x4(0.0, 0.0, near, 0.0),
-    };
-
-    // Lookup common resources which may be needed for all the passes.
-    const depth_texv = gctx.lookupResource(ctx.depth.texv) orelse return error.a;
-    const uniform_bg = gctx.lookupResource(ctx.uniform_bg) orelse return error.b;
-    const vertex_buf_info = gctx.lookupResourceInfo(ctx.vertex_buf) orelse return error.c;
-    const index_buf_info = gctx.lookupResourceInfo(ctx.index_buf) orelse return error.d;
-
-    const swapchain_texv = gctx.swapchain.getCurrentTextureView();
-    defer swapchain_texv.release();
-
-    const commands = commands: {
-        const encoder = gctx.device.createCommandEncoder(null);
-        defer encoder.release();
-
-        const frame_unif_mem = frame_unif_mem: {
-            const mem = gctx.uniformsAllocate(Context.FrameUniforms, 1);
-            mem.slice[0] = .{
-                .world_to_clip = zmath.transpose(zmath.mul(view, projection)),
-            };
-            break :frame_unif_mem mem;
-        };
-
-        pass: {
-            const render_pipe = gctx.lookupResource(ctx.render_pipe) orelse break :pass;
-
-            const pass = zgpu.beginRenderPassSimple(
-                encoder,
-                .clear,
-                swapchain_texv,
-                .{ .r = 0.2, .g = 0.1, .b = 0.0, .a = 1.0 },
-                depth_texv,
-                0.0,
-            );
-            defer zgpu.endReleasePass(pass);
-
-            pass.setVertexBuffer(0, vertex_buf_info.gpuobj.?, 0, vertex_buf_info.size);
-            pass.setIndexBuffer(
-                index_buf_info.gpuobj.?,
-                if (Context.Mesh.IndexType == u16) .uint16 else .uint32,
-                0,
-                index_buf_info.size,
-            );
-
-            pass.setPipeline(render_pipe);
-            pass.setBindGroup(0, uniform_bg, &.{frame_unif_mem.offset});
-
-            const mem = gctx.uniformsAllocate(Context.DrawUniforms, 1);
-            mem.slice[0] = .{
-                .object_to_world = zmath.identity(),
-            };
-            pass.setBindGroup(1, uniform_bg, &.{mem.offset});
-            pass.drawIndexed(
-                6, // num indices
-                1,
-                0, // index offset
-                0, // vertex offset
-                0,
-            );
-        }
-        break :commands encoder.finish(null);
-    };
-    defer commands.release();
-
-    gctx.submit(&.{commands});
-
-    if (ctx.gctx.present() == .swap_chain_resized) {
-        // Release old depth texture.
-        ctx.gctx.releaseResource(ctx.depth.texv);
-        ctx.gctx.destroyResource(ctx.depth.tex);
-
-        // Create a new depth texture to match the new window size.
-        ctx.depth.tex = ctx.gctx.createTexture(.{
-            .usage = .{ .render_attachment = true },
-            .dimension = .tdim_2d,
-            .size = .{
-                .width = ctx.gctx.swapchain_descriptor.width,
-                .height = ctx.gctx.swapchain_descriptor.height,
-                .depth_or_array_layers = 1,
-            },
-            .format = .depth32_float,
-            .mip_level_count = 1,
-            .sample_count = 1,
-        });
-        ctx.depth.texv = ctx.gctx.createTextureView(ctx.depth.tex, .{});
-    }
-}
+//---------- PUBLIC METHODS ---------//
 
 pub fn init(alloc: std.mem.Allocator) !void {
     try zglfw.init();
@@ -173,13 +58,170 @@ pub fn init(alloc: std.mem.Allocator) !void {
     ctx.depth = .{ .tex = depth_tex, .texv = depth_texv };
 
     try createPipeline(alloc);
-    try createSquare();
 }
 
 pub fn deinit(alloc: std.mem.Allocator) void {
     ctx.gctx.destroy(alloc);
     zglfw.terminate();
 }
+
+pub fn shouldContinue() bool {
+    const no_exit_requested = !ctx.window.shouldClose() and ctx.window.getKey(.escape) != .press;
+    zglfw.pollEvents();
+    return no_exit_requested;
+}
+
+pub fn loadGltfMesh(alloc: std.mem.Allocator, file_name: [:0]const u8) !void {
+    var gltf_indices = std.ArrayList(u32).init(alloc);
+    defer gltf_indices.deinit();
+
+    var gltf_vertices = std.ArrayList([3]f32).init(alloc);
+    defer gltf_vertices.deinit();
+
+    zmesh.init(alloc);
+    defer zmesh.deinit();
+
+    const gltf_engine = try zmesh.io.parseAndLoadFile(file_name);
+    defer zmesh.io.freeData(gltf_engine);
+
+    try zmesh.io.appendMeshPrimitive(
+        gltf_engine,
+        0,
+        0,
+        &gltf_indices,
+        &gltf_vertices,
+        null,
+        null,
+        null,
+    );
+
+    const vertices = try alloc.alloc(f32, gltf_vertices.items.len * 3);
+    defer alloc.free(vertices);
+
+    for (gltf_vertices.items, 0..) |vert, i| {
+        vertices[i * 3 + 0] = vert[0];
+        vertices[i * 3 + 1] = vert[1];
+        vertices[i * 3 + 2] = vert[2];
+    }
+
+    ctx.vertex_buf = ctx.gctx.createBuffer(.{
+        .usage = .{ .copy_dst = true, .vertex = true },
+        .size = vertices.len * @sizeOf(f32),
+    });
+    ctx.gctx.queue.writeBuffer(ctx.gctx.lookupResource(ctx.vertex_buf).?, 0, f32, vertices);
+
+    ctx.index_buf = ctx.gctx.createBuffer(.{
+        .usage = .{ .copy_dst = true, .index = true },
+        .size = gltf_indices.items.len * @sizeOf(u32),
+    });
+    ctx.gctx.queue.writeBuffer(ctx.gctx.lookupResource(ctx.index_buf).?, 0, u32, gltf_indices.items);
+
+    ctx.num_indices = @as(u32, @intCast(gltf_indices.items.len));
+}
+
+pub fn drawFrame() !void {
+    const gctx = ctx.gctx;
+    const fb_width = gctx.swapchain_descriptor.width;
+    const fb_height = gctx.swapchain_descriptor.height;
+
+    const eye = zmath.f32x4(-3, -3, -2, 0);
+    const focus = zmath.f32x4s(0);
+    const up = zmath.f32x4(0, 0, 1, 0);
+    const view = zmath.lookAtRh(eye, focus, up);
+
+    const near = 0.1;
+    const fov_y = 0.33 * std.math.pi;
+    const f = 1.0 / std.math.tan(fov_y / 2.0);
+    const a: f32 = @as(f32, @floatFromInt(fb_width)) / @as(f32, @floatFromInt(fb_height));
+    const projection = zmath.Mat{ // infinite far plane, reversed z
+        zmath.f32x4(f / a, 0.0, 0.0, 0.0),
+        zmath.f32x4(0.0, f, 0.0, 0.0),
+        zmath.f32x4(0.0, 0.0, 0.0, -1.0),
+        zmath.f32x4(0.0, 0.0, near, 0.0),
+    };
+
+    const depth_texv = gctx.lookupResource(ctx.depth.texv) orelse return error.a;
+    const uniform_bg = gctx.lookupResource(ctx.uniform_bg) orelse return error.b;
+    const vertex_buf_info = gctx.lookupResourceInfo(ctx.vertex_buf) orelse return error.c;
+    const index_buf_info = gctx.lookupResourceInfo(ctx.index_buf) orelse return error.d;
+
+    const swapchain_texv = gctx.swapchain.getCurrentTextureView();
+    defer swapchain_texv.release();
+
+    const commands = commands: {
+        const encoder = gctx.device.createCommandEncoder(null);
+        defer encoder.release();
+
+        const frame_unif_mem = frame_unif_mem: {
+            const mem = gctx.uniformsAllocate(Context.FrameUniforms, 1);
+            mem.slice[0] = .{
+                .world_to_clip = zmath.transpose(zmath.mul(view, projection)),
+            };
+            break :frame_unif_mem mem;
+        };
+
+        pass: {
+            const render_pipe = gctx.lookupResource(ctx.render_pipe) orelse break :pass;
+
+            const pass = zgpu.beginRenderPassSimple(
+                encoder,
+                .clear,
+                swapchain_texv,
+                .{ .r = 0.2, .g = 0.1, .b = 0.0, .a = 1.0 },
+                depth_texv,
+                0.0,
+            );
+            defer zgpu.endReleasePass(pass);
+
+            pass.setVertexBuffer(0, vertex_buf_info.gpuobj.?, 0, vertex_buf_info.size);
+            pass.setIndexBuffer(
+                index_buf_info.gpuobj.?,
+                .uint32,
+                0,
+                index_buf_info.size,
+            );
+
+            pass.setPipeline(render_pipe);
+            pass.setBindGroup(0, uniform_bg, &.{frame_unif_mem.offset});
+
+            const mem = gctx.uniformsAllocate(Context.DrawUniforms, 1);
+            mem.slice[0] = .{
+                .object_to_world = zmath.identity(),
+            };
+            pass.setBindGroup(1, uniform_bg, &.{mem.offset});
+            pass.drawIndexed(ctx.num_indices, 1, 0, 0, 0);
+        }
+        break :commands encoder.finish(null);
+    };
+    defer commands.release();
+
+    gctx.submit(&.{commands});
+
+    if (ctx.gctx.present() == .swap_chain_resized) { // if the window size changed
+        // Release old depth texture.
+        ctx.gctx.releaseResource(ctx.depth.texv);
+        ctx.gctx.destroyResource(ctx.depth.tex);
+
+        // Create a new depth texture to match the new window size.
+        ctx.depth.tex = ctx.gctx.createTexture(.{
+            .usage = .{ .render_attachment = true },
+            .dimension = .tdim_2d,
+            .size = .{
+                .width = ctx.gctx.swapchain_descriptor.width,
+                .height = ctx.gctx.swapchain_descriptor.height,
+                .depth_or_array_layers = 1,
+            },
+            .format = .depth32_float,
+            .mip_level_count = 1,
+            .sample_count = 1,
+        });
+        ctx.depth.texv = ctx.gctx.createTextureView(ctx.depth.tex, .{});
+    }
+}
+
+//---------- FILE PRIVATES ----------//
+
+var ctx = Context{};
 
 fn createPipeline(alloc: std.mem.Allocator) !void {
     const pl = ctx.gctx.createPipelineLayout(&.{ ctx.uniform_bgl, ctx.uniform_bgl });
@@ -241,33 +283,7 @@ fn createPipeline(alloc: std.mem.Allocator) !void {
     ctx.gctx.createRenderPipelineAsync(alloc, pl, pipe_desc, &ctx.render_pipe);
 }
 
-fn createSquare() !void {
-    const vertices: []const f32 = &.{
-        1,  2, 1,
-        -1, 2, 1,
-        -1, 2, -1,
-        1,  2, -1,
-    };
-    const indices: []const Context.Mesh.IndexType = &.{
-        0, 1, 2,
-        2, 3, 0,
-    };
-
-    ctx.vertex_buf = ctx.gctx.createBuffer(.{
-        .usage = .{ .copy_dst = true, .vertex = true },
-        .size = vertices.len * @sizeOf(f32),
-    });
-    ctx.gctx.queue.writeBuffer(ctx.gctx.lookupResource(ctx.vertex_buf).?, 0, f32, vertices);
-
-    // Index buffer
-    ctx.index_buf = ctx.gctx.createBuffer(.{
-        .usage = .{ .copy_dst = true, .index = true },
-        .size = indices.len * @sizeOf(Context.Mesh.IndexType),
-    });
-    ctx.gctx.queue.writeBuffer(ctx.gctx.lookupResource(ctx.index_buf).?, 0, Context.Mesh.IndexType, indices);
-}
-
-pub const Context = struct {
+const Context = struct {
     window: *zglfw.Window = undefined,
     gctx: *zgpu.GraphicsContext = undefined,
     cur_res_x: i32 = 1024,
@@ -281,6 +297,7 @@ pub const Context = struct {
 
     vertex_buf: zgpu.BufferHandle = undefined,
     index_buf: zgpu.BufferHandle = undefined,
+    num_indices: u32 = 0,
 
     // Anything that needs to be uploaded to GPU as a block (like this struct) needs extern to be safe.
     pub const FrameUniforms = extern struct {
@@ -297,8 +314,6 @@ pub const Context = struct {
         vertex_offset: i32,
         num_indices: u32,
         num_vertices: u32,
-
-        pub const IndexType = zmesh.Shape.IndexType;
     };
     pub const Depth = extern struct {
         tex: zgpu.TextureHandle = undefined,
