@@ -128,7 +128,7 @@ pub fn drawFrame() !void {
     const fb_width = gctx.swapchain_descriptor.width;
     const fb_height = gctx.swapchain_descriptor.height;
 
-    const eye = zmath.f32x4(-3, -3, -2, 0);
+    const eye = zmath.f32x4(300, 300, -2, 0);
     const focus = zmath.f32x4s(0);
     const up = zmath.f32x4(0, 0, 1, 0);
     const view = zmath.lookAtRh(eye, focus, up);
