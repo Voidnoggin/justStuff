@@ -77,9 +77,9 @@ pub fn loadGltfMesh(alloc: std.mem.Allocator, file_name: [:0]const u8) !void {
 
     var gltf_positions = std.ArrayList([3]f32).init(alloc);
     defer gltf_positions.deinit();
-	
-	var gltf_normals = std.ArrayList([3]f32).init(alloc);
-	defer gltf_normals.deinit();
+
+    var gltf_normals = std.ArrayList([3]f32).init(alloc);
+    defer gltf_normals.deinit();
 
     zmesh.init(alloc);
     defer zmesh.deinit();
@@ -98,23 +98,21 @@ pub fn loadGltfMesh(alloc: std.mem.Allocator, file_name: [:0]const u8) !void {
         null,
     );
 
-    const vertices = try alloc.alloc(f32, gltf_positions.items.len * 6);
-    defer alloc.free(vertices);
+    var vertices = try std.ArrayList(Context.Vertex).initCapacity(alloc, gltf_positions.items.len);
+    defer vertices.deinit();
 
     for (gltf_positions.items, 0..) |vert, i| {
-        vertices[i * 6 + 0] = vert[0];
-        vertices[i * 6 + 1] = vert[1];
-        vertices[i * 6 + 2] = vert[2];
-		vertices[i * 6 + 3] = gltf_normals.items[i][0];
-		vertices[i * 6 + 4] = gltf_normals.items[i][1];
-		vertices[i * 6 + 5] = gltf_normals.items[i][2];
+        try vertices.append(.{
+            .position = vert,
+            .normal = gltf_normals.items[i],
+        });
     }
-	
-	ctx.vertex_buf = ctx.gctx.createBuffer(.{
+
+    ctx.vertex_buf = ctx.gctx.createBuffer(.{
         .usage = .{ .copy_dst = true, .vertex = true },
-        .size = vertices.len * @sizeOf(f32),
+        .size = vertices.items.len * @sizeOf(Context.Vertex),
     });
-    ctx.gctx.queue.writeBuffer(ctx.gctx.lookupResource(ctx.vertex_buf).?, 0, f32, vertices);
+    ctx.gctx.queue.writeBuffer(ctx.gctx.lookupResource(ctx.vertex_buf).?, 0, Context.Vertex, vertices.items);
 
     ctx.index_buf = ctx.gctx.createBuffer(.{
         .usage = .{ .copy_dst = true, .index = true },
@@ -254,7 +252,7 @@ fn createPipeline(alloc: std.mem.Allocator) !void {
 
     const vertex_attributes = [_]zgpu.wgpu.VertexAttribute{
         .{ .format = .float32x3, .offset = 0, .shader_location = 0 },
-		.{ .format = .float32x3, .offset = 4, .shader_location = 1 },
+        .{ .format = .float32x3, .offset = @offsetOf(Context.Vertex, "normal"), .shader_location = 1 },
     };
 
     const vertex_buffers = [_]zgpu.wgpu.VertexBufferLayout{.{
@@ -315,7 +313,7 @@ const Context = struct {
     };
     pub const Vertex = extern struct {
         position: [3]f32,
-		normal: [3]f32,
+        normal: [3]f32,
     };
     pub const Mesh = extern struct {
         index_offset: u32,
