@@ -80,6 +80,9 @@ pub fn loadGltfMesh(alloc: std.mem.Allocator, file_name: [:0]const u8) !void {
 
     var gltf_normals = std.ArrayList([3]f32).init(alloc);
     defer gltf_normals.deinit();
+	
+	var gltf_texcoords = std.ArrayList([2]f32).init(alloc);
+	defer gltf_texcoords.deinit();
 
     zmesh.init(alloc);
     defer zmesh.deinit();
@@ -94,7 +97,7 @@ pub fn loadGltfMesh(alloc: std.mem.Allocator, file_name: [:0]const u8) !void {
         &gltf_indices,
         &gltf_positions,
         &gltf_normals,
-        null,
+        &gltf_texcoords,
         null,
     );
 
@@ -105,6 +108,7 @@ pub fn loadGltfMesh(alloc: std.mem.Allocator, file_name: [:0]const u8) !void {
         try vertices.append(.{
             .position = vert,
             .normal = gltf_normals.items[i],
+			.texcoord = gltf_texcoords.items[i],
         });
     }
 
@@ -253,6 +257,7 @@ fn createPipeline(alloc: std.mem.Allocator) !void {
     const vertex_attributes = [_]zgpu.wgpu.VertexAttribute{
         .{ .format = .float32x3, .offset = 0, .shader_location = 0 },
         .{ .format = .float32x3, .offset = @offsetOf(Context.Vertex, "normal"), .shader_location = 1 },
+		.{ .format = .float32x2, .offset = @offsetOf(Context.Vertex, "texcoord"), .shader_location = 2 },
     };
 
     const vertex_buffers = [_]zgpu.wgpu.VertexBufferLayout{.{
@@ -314,6 +319,7 @@ const Context = struct {
     pub const Vertex = extern struct {
         position: [3]f32,
         normal: [3]f32,
+		texcoord: [2]f32,
     };
     pub const Mesh = extern struct {
         index_offset: u32,
