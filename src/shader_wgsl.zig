@@ -27,7 +27,7 @@ pub const basic = struct {
     \\      output.position_clip = vec4(position, 1.0) * draw_uniforms.object_to_world * frame_uniforms.world_to_clip;
     \\      output.position = (vec4(position, 1.0) * draw_uniforms.object_to_world).xyz;
     \\      output.normal = (vec4(normal, 0.0) * draw_uniforms.object_to_world).xyz;
-	\\		output.texcoord = (vec4(texcoord, 0.0, 0.0) * draw_uniforms.object_to_world).xy;
+	\\		output.texcoord = vec4(texcoord, 0.0, 0.0).xy;
     \\      return output;
     \\  }
     ;
