@@ -126,9 +126,16 @@ pub fn loadGltfMesh(alloc: std.mem.Allocator, file_name: [:0]const u8) !void {
 
     ctx.num_indices = @as(u32, @intCast(gltf_indices.items.len));
 
-    if (gltf_data.images) |textures| {
-        std.debug.print("{s}\n", .{textures[0].name.?});
-    } else std.debug.print("nope\n", .{});
+    if (gltf_data.textures) |textures| {
+        if (textures[0].name) |name| {
+            std.debug.print("Texture name: {s}\n", .{name});
+        } else std.debug.print("Texture (no name)\n", .{});
+        const image_bytes_ptr = @as([*]u8, @ptrCast(textures[0].image.?.buffer_view.?.buffer.data.?));
+        const image_bytes = image_bytes_ptr[0..textures[0].image.?.buffer_view.?.buffer.size];
+        for (0..16) |i| {
+            std.debug.print("{x}\n", .{image_bytes[i]});
+        }
+    } else std.debug.print("No textures\n", .{});
 }
 
 pub fn drawFrame() !void {
@@ -136,12 +143,12 @@ pub fn drawFrame() !void {
     const fb_width = gctx.swapchain_descriptor.width;
     const fb_height = gctx.swapchain_descriptor.height;
 
-    const eye = zmath.f32x4(300, 300, -2, 0);
+    const eye = zmath.f32x4(-0.08, -0.05, -0.08, 0);
     const focus = zmath.f32x4s(0);
     const up = zmath.f32x4(0, 0, 1, 0);
     const view = zmath.lookAtRh(eye, focus, up);
 
-    const near = 0.1;
+    const near = 0.01;
     const fov_y = 0.33 * std.math.pi;
     const f = 1.0 / std.math.tan(fov_y / 2.0);
     const a: f32 = @as(f32, @floatFromInt(fb_width)) / @as(f32, @floatFromInt(fb_height));
