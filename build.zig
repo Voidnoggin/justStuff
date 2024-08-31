@@ -22,6 +22,9 @@ pub fn build(b: *std.Build) !void {
     const zmesh = b.dependency("zmesh", .{
         .target = target,
     });
+    const zstbi = b.dependency("zstbi", .{
+        .target = target,
+    });
 
     // The executable
     const exe = b.addExecutable(.{
@@ -35,12 +38,14 @@ pub fn build(b: *std.Build) !void {
     exe.root_module.addImport("zgui", zgui.module("root"));
     exe.root_module.addImport("zmath", zmath.module("root"));
     exe.root_module.addImport("zmesh", zmesh.module("root"));
+    exe.root_module.addImport("zstbi", zstbi.module("root"));
 
     b.installArtifact(exe);
     exe.linkLibrary(zglfw.artifact("glfw"));
     exe.linkLibrary(zgpu.artifact("zdawn"));
     exe.linkLibrary(zgui.artifact("imgui"));
     exe.linkLibrary(zmesh.artifact("zmesh"));
+    exe.linkLibrary(zstbi.artifact("zstbi"));
     @import("zgpu").addLibraryPathsTo(exe);
 
     // Tests

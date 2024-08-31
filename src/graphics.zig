@@ -3,6 +3,7 @@ const zglfw = @import("zglfw");
 const zgpu = @import("zgpu");
 const zmath = @import("zmath");
 const zmesh = @import("zmesh");
+const zstbi = @import("zstbi");
 const wgsl = @import("shader_wgsl.zig");
 
 //---------- PUBLIC METHODS ---------//
@@ -135,6 +136,12 @@ pub fn loadGltfMesh(alloc: std.mem.Allocator, file_name: [:0]const u8) !void {
         for (0..16) |i| {
             std.debug.print("{x}\n", .{image_bytes[i]});
         }
+
+        zstbi.init(alloc);
+        defer zstbi.deinit();
+
+        var image = try zstbi.Image.loadFromMemory(image_bytes, 4);
+        defer image.deinit();
     } else std.debug.print("No textures\n", .{});
 }
 
