@@ -142,6 +142,31 @@ pub fn loadGltfMesh(alloc: std.mem.Allocator, file_name: [:0]const u8) !void {
 
         var image = try zstbi.Image.loadFromMemory(image_bytes, 4);
         defer image.deinit();
+		
+		const base_tex = ctx.gctx.createTexture(.{
+			.usage = .{.texture_binding = true, .copy_dst = true },
+			.size = .{
+				.width = image.width,
+				.height = image.height,
+				.depth_or_array_layers = 1
+			},
+			.format = zgpu.imageInfoToTextureFormat(
+				image.num_components,
+				image.bytes_per_component,
+				image.is_hdr,
+			),
+		});
+		ctx.gctx.queue.writeTexture(
+			.{ .texture = ctx.gctx.lookupResource(base_tex).? },
+			.{
+				.bytes_per_row = image.bytes_per_row,
+				.rows_per_image = image.height,
+			},
+			.{ .width = image.width, .height = image.height },
+			u8,
+			image.data,
+		);
+		ctx.material =.{ .base_map = base_tex};
     } else std.debug.print("No textures\n", .{});
 }
 
@@ -326,6 +351,7 @@ const Context = struct {
     vertex_buf: zgpu.BufferHandle = undefined,
     index_buf: zgpu.BufferHandle = undefined,
     texture: zgpu.TextureHandle = undefined,
+	material: Material = undefined,
     num_indices: u32 = 0,
 
     // Anything that needs to be uploaded to GPU as a block (like this struct) needs extern to be safe.
@@ -350,4 +376,7 @@ const Context = struct {
         tex: zgpu.TextureHandle = undefined,
         texv: zgpu.TextureViewHandle = undefined,
     };
+	pub const Material = extern struct {
+		base_map: zgpu.TextureHandle = undefined,
+	};
 };
