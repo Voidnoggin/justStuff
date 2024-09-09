@@ -9,6 +9,8 @@ const wgsl = @import("shader_wgsl.zig");
 //---------- PUBLIC METHODS ---------//
 
 pub fn init(alloc: std.mem.Allocator) !void {
+    zmesh.init(alloc);
+    zstbi.init(alloc);
     try zglfw.init();
     ctx.window = try zglfw.Window.create(ctx.cur_res_x, ctx.cur_res_y, "just stuff", null);
 
@@ -28,30 +30,11 @@ pub fn init(alloc: std.mem.Allocator) !void {
         .{},
     );
 
-    // Uniform buffer and layout
+    // Bind Group Layout
     ctx.uniform_bgl = ctx.gctx.createBindGroupLayout(&.{
         zgpu.bufferEntry(0, .{ .vertex = true, .fragment = true }, .uniform, true, 0),
         zgpu.textureEntry(1, .{ .fragment = true }, .float, .tvdim_2d, false),
         zgpu.samplerEntry(2, .{ .fragment = true }, .filtering),
-    });
-    defer ctx.gctx.releaseResource(ctx.uniform_bgl);
-
-    const sampler = ctx.gctx.createSampler(.{});
-
-    ctx.uniform_bg = ctx.gctx.createBindGroup(ctx.uniform_bgl, &.{
-        .{
-            .binding = 0,
-            .buffer_handle = ctx.gctx.uniforms.buffer,
-            .offset = 0,
-            .size = @max(@sizeOf(Context.FrameUniforms), @sizeOf(Context.DrawUniforms)),
-        },
-
-        .{
-            .binding = 1,
-            .texture_view_handle = ctx.material.base_view,
-        },
-
-        .{ .binding = 2, .sampler_handle = sampler },
     });
 
     const depth_tex = ctx.gctx.createTexture(.{
@@ -73,8 +56,11 @@ pub fn init(alloc: std.mem.Allocator) !void {
 }
 
 pub fn deinit(alloc: std.mem.Allocator) void {
+    ctx.gctx.releaseResource(ctx.uniform_bgl);
     ctx.gctx.destroy(alloc);
     zglfw.terminate();
+    zstbi.deinit();
+    zmesh.deinit();
 }
 
 pub fn shouldContinue() bool {
@@ -84,11 +70,10 @@ pub fn shouldContinue() bool {
 }
 
 const Object = struct {
-    indices: std.ArrayList(u32) = undefined,
-    vertices: std.ArrayList(Context.Vertex) = undefined,
-    texture: zstbi.Image = undefined,
+    indices: std.ArrayList(u32),
+    vertices: std.ArrayList(Context.Vertex),
+    texture: ?zstbi.Image = null,
 };
-var single_object: Object = .{};
 
 pub fn loadGltfMesh(alloc: std.mem.Allocator, file_name: [:0]const u8) !void {
     var gltf_indices = std.ArrayList(u32).init(alloc);
@@ -102,9 +87,6 @@ pub fn loadGltfMesh(alloc: std.mem.Allocator, file_name: [:0]const u8) !void {
 
     var gltf_texcoords = std.ArrayList([2]f32).init(alloc);
     defer gltf_texcoords.deinit();
-
-    zmesh.init(alloc);
-    defer zmesh.deinit();
 
     const gltf_data = try zmesh.io.parseAndLoadFile(file_name);
     defer zmesh.io.freeData(gltf_data);
@@ -131,32 +113,29 @@ pub fn loadGltfMesh(alloc: std.mem.Allocator, file_name: [:0]const u8) !void {
         });
     }
 
+    var single_object: Object = .{
+        .indices = gltf_indices,
+        .vertices = vertices,
+    };
+
     if (gltf_data.textures) |textures| {
-        if (textures[0].name) |name| {
-            std.debug.print("texture name: {s}\n", .{name});
-        } else std.debug.print("texture (no name)\n", .{});
+        // if (textures[0].name) |name| {
+        //     std.debug.print("texture name: {s}\n", .{name});
+        // } else std.debug.print("texture (no name)\n", .{});
         const image_bytes_ptr = @as([*]u8, @ptrCast(textures[0].image.?.buffer_view.?.buffer.data.?));
         const image_bytes = image_bytes_ptr[0..textures[0].image.?.buffer_view.?.buffer.size];
-        for (0..16) |i| {
-            std.debug.print("{x}\n", .{image_bytes[i]});
-        }
+        // for (0..16) |i| {
+        //     std.debug.print("{x}\n", .{image_bytes[i]});
+        // }
+        single_object.texture = try zstbi.Image.loadFromMemory(image_bytes, 4);
+    } else {
+        // std.debug.print("no textures", .{});
+        return error.NoTexture; // just exit with error if no texture
+    }
 
-        zstbi.init(alloc);
-        defer zstbi.deinit();
+    const image = &single_object.texture.?; // from now on assume there is a texture
+    defer image.deinit(); // done with image data after this
 
-        var image = try zstbi.Image.loadFromMemory(image_bytes, 4);
-        defer image.deinit();
-
-        single_object.texture = image;
-    } else std.debug.print("no textures", .{});
-
-    single_object.indices = gltf_indices;
-    single_object.vertices = vertices;
-}
-
-pub fn processGltfMesh() !void {
-    const vertices = single_object.vertices;
-    const image = single_object.texture;
     ctx.vertex_buf = ctx.gctx.createBuffer(.{
         .usage = .{ .copy_dst = true, .vertex = true },
         .size = vertices.items.len * @sizeOf(Context.Vertex),
@@ -194,6 +173,24 @@ pub fn processGltfMesh() !void {
 
     const base_tex_view = ctx.gctx.createTextureView(base_tex, .{});
     ctx.material = .{ .base_view = base_tex_view };
+
+    const sampler = ctx.gctx.createSampler(.{});
+
+    ctx.uniform_bg = ctx.gctx.createBindGroup(ctx.uniform_bgl, &.{
+        .{
+            .binding = 0,
+            .buffer_handle = ctx.gctx.uniforms.buffer,
+            .offset = 0,
+            .size = @max(@sizeOf(Context.FrameUniforms), @sizeOf(Context.DrawUniforms)),
+        },
+
+        .{
+            .binding = 1,
+            .texture_view_handle = ctx.material.base_view,
+        },
+
+        .{ .binding = 2, .sampler_handle = sampler },
+    });
 }
 
 pub fn drawFrame() !void {
