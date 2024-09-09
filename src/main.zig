@@ -6,10 +6,12 @@ pub fn main() !void {
     defer _ = heap.deinit(); // memory leak check inside deinit
     const alloc = heap.allocator();
 
+	try graphics.loadGltfMesh(alloc, "assets/Avocado.glb");
+
     try graphics.init(alloc);
     defer graphics.deinit(alloc);
 
-    try graphics.loadGltfMesh(alloc, "assets/Avocado.glb");
+	try graphics.processGltfMesh();
 
     var was_error: ?anyerror = null;
     while (graphics.shouldContinue()) {
