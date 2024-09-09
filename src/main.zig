@@ -11,8 +11,6 @@ pub fn main() !void {
 
     try graphics.loadGltfMesh(alloc, "assets/Avocado.glb");
 
-    // try graphics.processGltfMesh();
-
     var was_error: ?anyerror = null;
     while (graphics.shouldContinue()) {
         graphics.drawFrame() catch |err| {
